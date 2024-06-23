@@ -14,7 +14,7 @@ from config import yolo_config
 from loss import yolo_loss
 
 
-class Yolov4(object):
+class Yolov4:
     def __init__(self,
                  weight_path=None,
                  class_name_path='coco_classes.txt',
