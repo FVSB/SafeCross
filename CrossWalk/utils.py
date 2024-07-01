@@ -72,11 +72,16 @@ def clock(func):
 @handle_exceptions
 def train(
         data_path: str,
-        pre_train_model_path: str = 'yolov8n.pt',
+        pre_train_model_path: str = '',
         save_model_name:str='modelo_fine_tuned.pt',
         epochs: int = 50,
         save_period: int = 1,
+        imgsz: int = 512,
+        batch: int = 32,
+        patience=50,
         seed: int = 123,
+        training_results=r'C:\Users\paco2\Documents\GitHub\MachineLearningProyect\CrossWalk\proyect',
+        use_gpu: bool = True
 
         ):
     """
@@ -86,27 +91,46 @@ def train(
 
     """
     # Cargar el modelo pre-entrenado
-    model = YOLO(pre_train_model_path)  # Carga el modelo YOLOv8n pre-entrenado
+    model = YOLO('yolov8n.pt')  # Carga el modelo YOLOv8n pre-entrenado
+    results = None
+    if pre_train_model_path in [None, '', ' ']:
+        # Realizar el fine-tuning
+        results = model.train(
+            data=data_path,
+            val=True,
+            epochs=epochs,
+            imgsz=imgsz,
+            save_period=save_period,
+            device="0" if use_gpu else "cpu",  # Utilizar GPU 0
+            project=training_results,
+            batch=batch,
+            cache=True,  # Almacena las imágenes del conjunto de datos en RAM
+            verbose=True,
+            seed=seed,
+            patience=patience,
+            resume=True,
+            model=pre_train_model_path
 
-    # Realizar el fine-tuning
-    results = model.train(
-        data=data_path,
-        val=True,
-        epochs=epochs,
+        )
+    else:
+        results = model.train(
+            data=data_path,
+            val=True,
+            epochs=epochs,
+            imgsz=imgsz,
+            save_period=save_period,
+            device="0" if use_gpu else "cpu",  # Utilizar GPU 0
+            project=training_results,
+            batch=batch,
+            cache=True,  # Almacena las imágenes del conjunto de datos en RAM
+            verbose=True,
+            seed=seed,
+            patience=patience,
+            resume=True,
+        )
 
-        save_period=save_period,
-        # pretrained=True,  # Utilizar pesos pre-entrenados
-        device="0",  # Utilizar GPU 0
-        project='view',
-        # batch=0.99,  # Automáticamente determinará el tamaño del lote
-        cache=True,  # Almacena las imágenes del conjunto de datos en RAM
-
-
-        verbose=True,
-        seed=seed,
-
-
-    )
 
     # Guardar el modelo final
     model.save(save_model_name)
+
+    return model,results
