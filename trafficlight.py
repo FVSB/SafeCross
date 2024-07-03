@@ -37,8 +37,9 @@ def convert_annotation(xml_file, output_dir, classes):
 classes = ["red light", "yellow light", "green light"]
 
 # Paths
-xml_dir = 'C:/Users/Diana Laura/Desktop/ML/dataset/annotations/xml'
-output_dir = 'C:/Users/Diana Laura/Desktop/ML/dataset/annotations/output'
+current_path = os.getcwd()
+xml_dir = os.path.join(current_path,'dataset/annotations/xml')
+output_dir = os.path.join(current_path, 'dataset/annotations/output')
 os.makedirs(output_dir, exist_ok=True)
 
 # Convert all XML files
