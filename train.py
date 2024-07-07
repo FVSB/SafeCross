@@ -9,10 +9,11 @@ model = YOLO(model_path)
 # Realizar fine-tuning
 results = model.train(
     data=os.path.join(current_path,'TrafficLight.yaml'),
-    epochs=5,
+    epochs=40,
     imgsz=640,
     batch=16,
-    name='yolov8m_traffic_light'
+    name='yolov8m_traffic_light',
+    device=0
 )
 
 # Guardar el modelo entrenado
