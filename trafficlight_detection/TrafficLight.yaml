@@ -1,0 +1,38 @@
+# TrafficLight.yaml
+# -----------------
+# Configuración del dataset para detección de semáforos peatonales.
+# Utilizado por train.py y kfold.py con Ultralytics YOLO.
+#
+# Estructura de directorios esperada (relativa a este archivo):
+#
+#   trafficlight_detection/
+#   ├── TrafficLight.yaml   ← este archivo
+#   └── dataset/
+#       ├── images/
+#       │   ├── train/      ← imágenes de entrenamiento (.jpg, .png)
+#       │   ├── val/        ← imágenes de validación
+#       │   └── test/       ← imágenes de prueba
+#       └── labels/
+#           ├── train/      ← etiquetas YOLO (.txt, generadas por trafficlight.py)
+#           ├── val/
+#           └── test/
+#
+# Para preparar las etiquetas desde anotaciones XML ejecutar:
+#   python trafficlight.py
+
+# Ruta raíz del dataset (relativa al archivo YAML)
+path: ./dataset
+
+# Subdirectorios de imágenes
+train: images/train
+val: images/val
+test: images/test
+
+# Número de clases
+nc: 3
+
+# Nombres de clases (el índice define el class_id en los .txt de YOLO)
+names:
+  0: red light
+  1: yellow light
+  2: green light

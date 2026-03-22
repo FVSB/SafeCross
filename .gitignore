@@ -1,3 +1,19 @@
+# Model weights (large binary files — do not track in git)
+*.pt
+*.pth
+*.onnx
+*.tflite
+
+# YOLO training outputs
+runs/
+
+# Dataset (images and labels — provide separately)
+trafficlight_detection/dataset/
+trafficlight_detection/fold_*/
+trafficlight_detection/data_fold_*.yaml
+trafficlight_detection/train_images_fold_*.txt
+trafficlight_detection/val_images_fold_*.txt
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]

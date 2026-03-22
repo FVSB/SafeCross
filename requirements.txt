@@ -1,0 +1,14 @@
+# SafeCross — Dependencias del proyecto
+# Instalar con: pip install -r requirements.txt
+
+# Detección de objetos con YOLO
+ultralytics>=8.0.0
+
+# Validación cruzada y utilities de ML
+scikit-learn>=1.0.0
+
+# Manejo de archivos YAML (configuración del dataset)
+PyYAML>=6.0
+
+# Operaciones numéricas
+numpy>=1.21.0
