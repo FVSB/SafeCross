@@ -1,7 +1,7 @@
 # SafeCross — Dependencias del proyecto
 # Instalar con: pip install -r requirements.txt
 
-# Detección de objetos con YOLO
+# Detección de objetos con YOLO (incluye torch, torchvision)
 ultralytics>=8.0.0
 
 # Validación cruzada y utilities de ML
@@ -12,3 +12,7 @@ PyYAML>=6.0
 
 # Operaciones numéricas
 numpy>=1.21.0
+
+# Procesamiento de imágenes
+opencv-python>=4.5.0
+Pillow>=9.0.0

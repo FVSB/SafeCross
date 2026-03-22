@@ -1,118 +1,124 @@
-# Pesos del Modelo — SafeCross Traffic Light Detection
+# Pesos del Modelo — SafeCross
 
-Los pesos (archivos `.pt`) **no se incluyen en el repositorio** por su tamaño
-(varios cientos de MB). Este documento explica cómo obtenerlos o reproducirlos.
-
----
-
-## Pesos Involucrados
-
-| Archivo                   | Descripción                                    | Tamaño aprox. |
-|---------------------------|------------------------------------------------|---------------|
-| `yolov8m.pt`              | YOLOv8m pre-entrenado en COCO (Ultralytics)    | ~52 MB        |
-| `yolov8m_TrafficLight.pt` | Fine-tuning final sobre el dataset del proyecto| ~52 MB        |
-| `best.pt`                 | Mejor checkpoint del entrenamiento (val loss)  | ~52 MB        |
+SafeCross utiliza **tres modelos YOLO independientes** que trabajan juntos para
+tomar la decisión de cruce. Los pesos se encuentran en la carpeta `weigths/`
+del repositorio (extraídos de la rama `Results`).
 
 ---
 
-## Cómo Obtener `yolov8m.pt` (peso base)
+## Modelos Disponibles
 
-El peso base se descarga automáticamente desde los servidores de Ultralytics
-la primera vez que se ejecuta `train.py`:
+| Archivo                 | Tarea                            | Arquitectura | Tamaño |
+|-------------------------|----------------------------------|--------------|--------|
+| `weigths/crosswalks.pt` | Detección de pasos de peatones   | YOLOv8n      | ~50 MB |
+| `weigths/lights.pt`     | Detección de color de semáforo   | YOLOv8m      | ~50 MB |
+| `weigths/persons_cars.pt`| Detección de personas y vehículos| YOLOv8n      | ~6 MB  |
+
+> **Formatos adicionales disponibles** (no incluidos en git por tamaño):
+> - `crosswalks.onnx` (~99 MB) — para inferencia con ONNX Runtime
+> - `crosswalks.torchscript` (~100 MB) — para deployment con TorchScript
+
+---
+
+## Cómo Usar los Pesos
+
+Los pesos se cargan automáticamente desde `weigths/` cuando se usa el módulo
+principal de SafeCross:
 
 ```python
-from ultralytics import YOLO
-model = YOLO("yolov8m.pt")  # se descarga automáticamente si no existe
-```
+from safecross.decide import can_cross, decide_verbose
 
-O manualmente:
+# Decisión simple (True = cruzar, False = esperar)
+resultado = can_cross("imagen.jpg")
 
-```bash
-pip install ultralytics
-python -c "from ultralytics import YOLO; YOLO('yolov8m.pt')"
+# Decisión con detalles de diagnóstico
+detalles = decide_verbose("imagen.jpg")
+print(detalles)
+# {
+#   "can_cross": True,
+#   "crosswalk_detected": True,
+#   "n_crosswalks": 1,
+#   "light_detected": True,
+#   "light_color": "verde",
+#   "reason": "Paso de peatones visible y semáforo en verde. Puede cruzar."
+# }
 ```
 
 ---
 
-## Cómo Generar `yolov8m_TrafficLight.pt` (peso entrenado)
+## Lógica de Decisión (3 modelos en conjunto)
 
-Para reproducir el entrenamiento desde cero:
+```
+Imagen de entrada
+      │
+      ▼
+┌─────────────────┐
+│ crosswalks.pt   │──► ¿Hay paso de peatones?
+└─────────────────┘         │
+    No → ESPERAR           Sí
+                            │
+                            ▼
+                   ┌─────────────────┐
+                   │  lights.pt      │──► ¿Qué color?
+                   └─────────────────┘
+                        │        │
+                    Rojo/Amarillo  Verde
+                        │            │
+                     ESPERAR       CRUZAR ✓
+```
 
-### Paso 1 — Preparar el dataset
+**Reglas:**
+- **CRUZAR** si: paso de peatones visible + semáforo verde + sin vehículos en el cruce
+- **ESPERAR** (o pedir ayuda) si: sin paso de peatones, o semáforo rojo/amarillo, o vehículo en cruce
+
+---
+
+## Métricas del Sistema Completo
+
+Evaluado sobre 64 imágenes de prueba:
+
+| Clase      | Precisión | Recall | F1-Score |
+|------------|-----------|--------|----------|
+| No cruzar  | 0.636     | **1.00**  | 0.778   |
+| Cruzar     | **1.00**  | 0.515  | 0.680   |
+
+**Puntos clave:**
+- **0 Falsos Positivos**: El sistema nunca indica "cruzar" cuando no es seguro
+- Tasa de 48% de Falsos Negativos: puede ser excesivamente conservador (indica esperar cuando sería seguro cruzar)
+- El objetivo principal — eliminar FP — se cumple completamente
+
+---
+
+## Cómo Re-entrenar los Modelos
+
+### Modelo de luces de semáforo (`lights.pt`)
+
+Ver instrucciones detalladas en [`../trafficlight_detection/README.md`](../trafficlight_detection/README.md).
 
 ```bash
 cd trafficlight_detection/
-python trafficlight.py          # convierte XML → YOLO .txt
-# Mover los .txt generados a dataset/labels/train/
+python train.py   # fine-tuning de YOLOv8m, 80 epochs
 ```
 
-### Paso 2 — Entrenar
+### Modelo de cruces peatonales (`crosswalks.pt`)
 
-```bash
-python train.py
-```
+El modelo fue entrenado con fine-tuning de YOLOv8n sobre un dataset de
+imágenes de cruces peatonales. Ver notebooks en la rama `Crosswalk`:
+- `CrossWalk/First_Data_Set/Fine_tuning.ipynb`
 
-- Epochs: 80
-- Batch: 16
-- Image size: 640×640
-- Patience (early stopping): 20
-- Hardware recomendado: GPU NVIDIA con ≥8 GB VRAM
+### Modelo de personas y vehículos (`persons_cars.pt`)
 
-El entrenamiento guarda:
-- `runs/detect/yolov8m_traffic_light/weights/best.pt` — mejor checkpoint
-- `runs/detect/yolov8m_traffic_light/weights/last.pt` — último checkpoint
-- `yolov8m_TrafficLight.pt` — copia del modelo final
-
-### Paso 3 (opcional) — Validación cruzada
-
-```bash
-python kfold.py
-```
-
-Genera 5 modelos en `runs/detect/yolov8m_traffic_light_fold_N/`.
+Entrenado con YOLOv8n para detectar personas y vehículos en el contexto
+de cruces peatonales.
 
 ---
 
-## Dónde Colocar los Pesos
+## Notas sobre el `.gitignore`
 
-```
-trafficlight_detection/
-├── yolov8m.pt              ← peso base (descargar de Ultralytics)
-├── best.pt                 ← mejor checkpoint (generado por train.py)
-├── yolov8m_TrafficLight.pt ← modelo final (generado por train.py)
-└── ...
-```
+Los archivos `.pt` de los modelos entrenados **SÍ están incluidos** en este
+repositorio (en `weigths/`) ya que son el resultado final del proyecto.
 
----
-
-## `.gitignore` — Los pesos están excluidos
-
-Los archivos `.pt` están en el `.gitignore` del proyecto por su tamaño.
-Para compartirlos se recomienda usar:
-
-- **Google Drive / OneDrive**: Subir y compartir enlace en el README.
-- **Hugging Face Hub**: Repositorio de modelos gratuito para proyectos de ML.
-- **GitHub Releases**: Para archivos ≤2 GB se pueden adjuntar como assets de release.
-
----
-
-## Métricas del Modelo Entrenado
-
-> Las métricas exactas se obtienen del informe completo del proyecto
-> (`Informe.pdf` en el repo `Machine_Learning_Final_Project`).
-
-El modelo fue entrenado con:
-- **Dataset**: Imágenes de semáforos peatonales (diurnas y nocturnas)
-- **Técnica**: Fine-tuning de YOLOv8m
-- **Validación**: 5-Fold Cross Validation
-- **Clases**: red light, yellow light, green light
-
-Para ver las métricas de entrenamiento después de entrenar:
-
-```python
-from ultralytics import YOLO
-model = YOLO("best.pt")
-metrics = model.val()
-print(metrics.box.map)   # mAP@50:95
-print(metrics.box.map50) # mAP@50
-```
+Lo que está **excluido** por tamaño:
+- Archivos `.onnx` y `.torchscript` (exportaciones grandes)
+- El peso base `yolov8m.pt` (se descarga automáticamente de Ultralytics)
+- Outputs de entrenamiento en `runs/`
