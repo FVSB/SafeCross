@@ -1,0 +1,12 @@
+# Agent OS Standards Index
+# Auto-populated by /index-standards. Used by /inject-standards for auto-detection.
+# Format: brief description (≤125 chars) per standard file.
+
+root: []
+
+standards:
+  annotation-format: "Pascal VOC XML to YOLO .txt conversion, 3 traffic light classes (red/yellow/green), bbox formula"
+  decision-logic: "can_cross() bool, decide_verbose() dict, lazy model loading, sequential check order, verde class"
+  ml-pipeline: "YOLOv8m fine-tuning params (80ep/16batch/640px), KFold(5,seed=42), relative paths, freeze_support"
+  model-inference: "predict() with save/save_txt, conf=0.75 default, weigths/ dir, lazy loading, FileNotFoundError"
+  project-structure: "weigths/ in git (.pt only), safecross/ package, trafficlight_detection/ scripts, .agent-os/ docs"

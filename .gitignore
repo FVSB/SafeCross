@@ -1,3 +1,24 @@
+# Windows Zone.Identifier metadata files (not needed on Linux/Mac)
+*:Zone.Identifier
+
+# Large export formats (use .pt instead)
+*.onnx
+*.tflite
+*.torchscript
+
+# YOLO training outputs (generated at runtime)
+runs/
+
+# Dataset (images and labels — provide separately)
+trafficlight_detection/dataset/
+trafficlight_detection/fold_*/
+trafficlight_detection/data_fold_*.yaml
+trafficlight_detection/train_images_fold_*.txt
+trafficlight_detection/val_images_fold_*.txt
+
+# Training-time base weights (downloaded automatically by Ultralytics)
+trafficlight_detection/yolov8m.pt
+
 # Byte-compiled / optimized / DLL files
 __pycache__/
 *.py[cod]
