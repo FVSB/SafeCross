@@ -1,0 +1,5 @@
+# Los archivos .tflite van aquí.
+# Ejecuta scripts/export_tflite.py para generarlos.
+# Archivos esperados:
+#   crosswalks.tflite
+#   lights.tflite

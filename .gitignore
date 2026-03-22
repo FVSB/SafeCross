@@ -3,8 +3,10 @@
 
 # Large export formats (use .pt instead)
 *.onnx
-*.tflite
 *.torchscript
+# Excluir .tflite globalmente, pero permitir los de la app (assets/models/)
+*.tflite
+!safecross_app/assets/models/*.tflite
 
 # YOLO training outputs (generated at runtime)
 runs/

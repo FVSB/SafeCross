@@ -1,20 +1,15 @@
 import 'dart:async';
-import 'dart:io';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 import 'package:flutter_tts/flutter_tts.dart';
 import 'package:permission_handler/permission_handler.dart';
-import 'package:shared_preferences/shared_preferences.dart';
 
 import '../models/decision_result.dart';
-import '../services/safecross_service.dart';
+import '../services/yolo_inference_service.dart';
 
-/// Intervalo entre análisis de frames (segundos).
+/// Intervalo mínimo entre análisis de frames.
 const _kAnalysisInterval = Duration(seconds: 3);
-
-/// URL del servidor por defecto (cambiar según red local).
-const _kDefaultServerUrl = 'http://192.168.1.100:8000';
 
 class CameraScreen extends StatefulWidget {
   final List<CameraDescription> cameras;
@@ -30,26 +25,23 @@ class _CameraScreenState extends State<CameraScreen>
   CameraController? _controller;
   bool _cameraReady = false;
   bool _analyzing = false;
+  bool _modelsLoading = true;
 
   DecisionResult? _lastResult;
   String? _errorMessage;
-
-  late FlutterTts _tts;
-  late String _serverUrl;
-  SafeCrossService? _service;
-
-  Timer? _analysisTimer;
   DecisionState? _lastSpokenState;
 
-  // Controlador del TextField en el diálogo de ajustes
-  final _urlController = TextEditingController();
+  late FlutterTts _tts;
+  final YoloInferenceService _inferenceService = YoloInferenceService();
+
+  DateTime? _lastAnalysisTime;
 
   @override
   void initState() {
     super.initState();
     WidgetsBinding.instance.addObserver(this);
     _initTts();
-    _loadSettings().then((_) => _requestCameraAndStart());
+    _loadModelsAndStart();
   }
 
   // ── TTS ────────────────────────────────────────────────────────────────────
@@ -66,21 +58,29 @@ class _CameraScreenState extends State<CameraScreen>
     await _tts.speak(text);
   }
 
-  // ── Ajustes ────────────────────────────────────────────────────────────────
+  // ── Inicialización ─────────────────────────────────────────────────────────
 
-  Future<void> _loadSettings() async {
-    final prefs = await SharedPreferences.getInstance();
-    _serverUrl = prefs.getString('server_url') ?? _kDefaultServerUrl;
-    _service = SafeCrossService(baseUrl: _serverUrl);
-  }
+  Future<void> _loadModelsAndStart() async {
+    // Cargar modelos TFLite en segundo plano
+    try {
+      await _inferenceService.loadModels();
+    } catch (e) {
+      if (!mounted) return;
+      setState(() {
+        _modelsLoading = false;
+        _errorMessage =
+            'Error al cargar modelos: $e\n\n'
+            'Asegúrate de haber ejecutado scripts/export_tflite.py '
+            'y copiado los .tflite a assets/models/';
+      });
+      return;
+    }
 
-  Future<void> _saveSettings(String url) async {
-    final prefs = await SharedPreferences.getInstance();
-    await prefs.setString('server_url', url);
-    setState(() {
-      _serverUrl = url;
-      _service = SafeCrossService(baseUrl: url);
-    });
+    if (!mounted) return;
+    setState(() => _modelsLoading = false);
+
+    // Pedir permiso de cámara e iniciar
+    await _requestCameraAndStart();
   }
 
   // ── Cámara ─────────────────────────────────────────────────────────────────
@@ -92,7 +92,8 @@ class _CameraScreenState extends State<CameraScreen>
       return;
     }
     if (widget.cameras.isEmpty) {
-      setState(() => _errorMessage = 'No se encontraron cámaras en este dispositivo.');
+      setState(() =>
+          _errorMessage = 'No se encontraron cámaras en este dispositivo.');
       return;
     }
     await _startCamera(widget.cameras.first);
@@ -103,7 +104,8 @@ class _CameraScreenState extends State<CameraScreen>
       camera,
       ResolutionPreset.medium,
       enableAudio: false,
-      imageFormatGroup: ImageFormatGroup.jpeg,
+      // YUV420 es el formato requerido por flutter_vision en Android
+      imageFormatGroup: ImageFormatGroup.yuv420,
     );
 
     try {
@@ -120,28 +122,31 @@ class _CameraScreenState extends State<CameraScreen>
       _cameraReady = true;
     });
 
-    _startAnalysisTimer();
+    // Iniciar stream de frames para análisis continuo
+    await controller.startImageStream(_onFrameAvailable);
   }
 
-  void _startAnalysisTimer() {
-    _analysisTimer?.cancel();
-    _analysisTimer = Timer.periodic(_kAnalysisInterval, (_) => _analyzeFrame());
-  }
+  /// Recibe cada frame del sensor y decide si analizarlo según el intervalo.
+  void _onFrameAvailable(CameraImage image) {
+    if (_analyzing) return;
 
-  Future<void> _analyzeFrame() async {
-    if (_analyzing || _controller == null || !_controller!.value.isInitialized) {
+    final now = DateTime.now();
+    if (_lastAnalysisTime != null &&
+        now.difference(_lastAnalysisTime!) < _kAnalysisInterval) {
       return;
     }
+    _lastAnalysisTime = now;
+    _analyzeFrame(image);
+  }
 
+  Future<void> _analyzeFrame(CameraImage image) async {
     setState(() => _analyzing = true);
 
     try {
-      final xFile = await _controller!.takePicture();
-      final file = File(xFile.path);
-      final result = await _service!.decide(file);
+      // Rotación 90° para corregir la orientación en portrait
+      final result = await _inferenceService.decide(image, rotation: 90);
 
       if (!mounted) return;
-
       setState(() {
         _lastResult = result;
         _errorMessage = null;
@@ -152,12 +157,9 @@ class _CameraScreenState extends State<CameraScreen>
         _lastSpokenState = result.state;
         await _speak(result.speechText);
       }
-    } on SafeCrossException catch (e) {
-      if (!mounted) return;
-      setState(() => _errorMessage = e.message);
     } catch (e) {
       if (!mounted) return;
-      setState(() => _errorMessage = 'Error inesperado: $e');
+      setState(() => _errorMessage = 'Error de inferencia: $e');
     } finally {
       if (mounted) setState(() => _analyzing = false);
     }
@@ -171,7 +173,7 @@ class _CameraScreenState extends State<CameraScreen>
     if (controller == null || !controller.value.isInitialized) return;
 
     if (state == AppLifecycleState.inactive) {
-      _analysisTimer?.cancel();
+      controller.stopImageStream();
       controller.dispose();
       setState(() => _cameraReady = false);
     } else if (state == AppLifecycleState.resumed) {
@@ -182,10 +184,10 @@ class _CameraScreenState extends State<CameraScreen>
   @override
   void dispose() {
     WidgetsBinding.instance.removeObserver(this);
-    _analysisTimer?.cancel();
+    _controller?.stopImageStream();
     _controller?.dispose();
+    _inferenceService.dispose();
     _tts.stop();
-    _urlController.dispose();
     super.dispose();
   }
 
@@ -198,13 +200,13 @@ class _CameraScreenState extends State<CameraScreen>
       body: Stack(
         fit: StackFit.expand,
         children: [
-          // ── Vista de cámara ─────────────────────────────────────────────
+          // Vista de cámara
           if (_cameraReady && _controller != null)
             CameraPreview(_controller!)
           else
             _buildPlaceholder(),
 
-          // ── Overlay de decisión (parte inferior) ───────────────────────
+          // Panel de decisión (parte inferior)
           Positioned(
             left: 0,
             right: 0,
@@ -212,26 +214,22 @@ class _CameraScreenState extends State<CameraScreen>
             child: _buildDecisionPanel(),
           ),
 
-          // ── Indicador de análisis (spinner) ────────────────────────────
+          // Spinner de análisis (esquina superior derecha)
           if (_analyzing)
             const Positioned(
               top: 50,
               right: 16,
               child: _AnalyzingBadge(),
             ),
-
-          // ── Botón de ajustes ───────────────────────────────────────────
-          Positioned(
-            top: 44,
-            left: 16,
-            child: _SettingsButton(onTap: _showSettingsDialog),
-          ),
         ],
       ),
     );
   }
 
   Widget _buildPlaceholder() {
+    if (_modelsLoading) {
+      return const _LoadingScreen(message: 'Cargando modelos de IA…');
+    }
     return Container(
       color: Colors.black,
       child: Center(
@@ -240,7 +238,8 @@ class _CameraScreenState extends State<CameraScreen>
                 padding: const EdgeInsets.all(32),
                 child: Text(
                   _errorMessage!,
-                  style: const TextStyle(color: Colors.white70, fontSize: 16),
+                  style:
+                      const TextStyle(color: Colors.white70, fontSize: 15),
                   textAlign: TextAlign.center,
                 ),
               )
@@ -250,6 +249,8 @@ class _CameraScreenState extends State<CameraScreen>
   }
 
   Widget _buildDecisionPanel() {
+    if (_modelsLoading) return const SizedBox.shrink();
+
     if (_errorMessage != null && _lastResult == null) {
       return _DecisionPanel(
         color: Colors.grey[900]!,
@@ -263,8 +264,8 @@ class _CameraScreenState extends State<CameraScreen>
       return _DecisionPanel(
         color: Colors.grey[850]!,
         icon: Icons.hourglass_empty,
-        label: 'ANALIZANDO...',
-        detail: 'Apunta la cámara hacia el cruce',
+        label: 'ANALIZANDO…',
+        detail: 'Apunta la cámara hacia el cruce peatonal',
       );
     }
 
@@ -276,56 +277,32 @@ class _CameraScreenState extends State<CameraScreen>
       detail: result.reason,
     );
   }
+}
 
-  // ── Diálogo de ajustes ─────────────────────────────────────────────────────
+// ── Widgets auxiliares ────────────────────────────────────────────────────────
 
-  void _showSettingsDialog() {
-    _urlController.text = _serverUrl;
+class _LoadingScreen extends StatelessWidget {
+  final String message;
+  const _LoadingScreen({required this.message});
 
-    showDialog<void>(
-      context: context,
-      builder: (ctx) => AlertDialog(
-        title: const Text('Ajustes del servidor'),
-        content: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: [
-            const Text(
-              'URL del servidor SafeCross\n(ej: http://192.168.1.5:8000)',
-              style: TextStyle(fontSize: 13),
-            ),
-            const SizedBox(height: 12),
-            TextField(
-              controller: _urlController,
-              keyboardType: TextInputType.url,
-              decoration: const InputDecoration(
-                border: OutlineInputBorder(),
-                hintText: 'http://...',
-              ),
-            ),
-          ],
-        ),
-        actions: [
-          TextButton(
-            onPressed: () => Navigator.pop(ctx),
-            child: const Text('Cancelar'),
-          ),
-          FilledButton(
-            onPressed: () async {
-              final url = _urlController.text.trim();
-              if (url.isEmpty) return;
-              await _saveSettings(url);
-              if (mounted) Navigator.pop(ctx);
-            },
-            child: const Text('Guardar'),
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      color: Colors.black,
+      child: Column(
+        mainAxisAlignment: MainAxisAlignment.center,
+        children: [
+          const CircularProgressIndicator(color: Colors.white),
+          const SizedBox(height: 24),
+          Text(
+            message,
+            style: const TextStyle(color: Colors.white70, fontSize: 16),
           ),
         ],
       ),
     );
   }
 }
-
-// ── Widgets auxiliares ────────────────────────────────────────────────────────
 
 class _DecisionPanel extends StatelessWidget {
   final Color color;
@@ -368,10 +345,8 @@ class _DecisionPanel extends StatelessWidget {
                 const SizedBox(height: 4),
                 Text(
                   detail,
-                  style: const TextStyle(
-                    color: Colors.white70,
-                    fontSize: 13,
-                  ),
+                  style:
+                      const TextStyle(color: Colors.white70, fontSize: 13),
                   maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                 ),
@@ -407,29 +382,11 @@ class _AnalyzingBadge extends StatelessWidget {
             ),
           ),
           SizedBox(width: 6),
-          Text('Analizando', style: TextStyle(color: Colors.white, fontSize: 12)),
+          Text(
+            'Analizando',
+            style: TextStyle(color: Colors.white, fontSize: 12),
+          ),
         ],
-      ),
-    );
-  }
-}
-
-class _SettingsButton extends StatelessWidget {
-  final VoidCallback onTap;
-
-  const _SettingsButton({required this.onTap});
-
-  @override
-  Widget build(BuildContext context) {
-    return GestureDetector(
-      onTap: onTap,
-      child: Container(
-        padding: const EdgeInsets.all(8),
-        decoration: BoxDecoration(
-          color: Colors.black54,
-          borderRadius: BorderRadius.circular(24),
-        ),
-        child: const Icon(Icons.settings, color: Colors.white, size: 24),
       ),
     );
   }
