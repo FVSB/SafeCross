@@ -1,0 +1,11 @@
+# Ignorar build artifacts de Flutter
+build/
+.dart_tool/
+.flutter-plugins
+.flutter-plugins-dependencies
+*.iml
+.idea/
+
+# NO ignorar lib/ (la regla global del repo bloquea lib/, pero aquí la necesitamos)
+!lib/
+!lib/**
