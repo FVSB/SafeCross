@@ -27,17 +27,6 @@ class DecisionResult {
     required this.reason,
   });
 
-  factory DecisionResult.fromJson(Map<String, dynamic> json) {
-    return DecisionResult(
-      canCross: json['can_cross'] as bool,
-      crosswalkDetected: json['crosswalk_detected'] as bool,
-      nCrosswalks: json['n_crosswalks'] as int,
-      lightDetected: json['light_detected'] as bool,
-      lightColor: json['light_color'] as String?,
-      reason: json['reason'] as String,
-    );
-  }
-
   /// Interpreta la respuesta en uno de los estados de la UI.
   DecisionState get state {
     if (canCross) return DecisionState.cross;
